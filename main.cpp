@@ -1,150 +1,172 @@
 #include <iostream>
 #include <vector>
-#include <math.h>
+#include <string>
 #include <random>
+#include <algorithm>
+#include <cstdint>
+#include <set>
 #include <iomanip>
 #include <fstream>
-#include <algorithm>
 
-void merge(std::vector<int> &a, int l, int m, int r) {
-    std::vector<int> left(a.begin() + l, a.begin() + m + 1);
-    std::vector<int> right(a.begin() + m + 1, a.begin() + r + 1);
-    int i = 0, j = 0, k = l;
-    while (i < left.size() && j < right.size()) {
-        if (left[i] <= right[j]) {
-            a[k] = left[i];
-            i++;
-            k++;
-        } else {
-            a[k] = right[j];
-            k++;
-            j++;
-        }
-    }
-    while (i < left.size()) {
-        a[k] = left[i];
-        i++;
-        k++;
-    }
-    while (j < right.size()) {
-        a[k] = right[j];
-        k++;
-        j++;
-    }
-}
+std::vector<std::vector<double>> memory = std::vector<std::vector<double>>(20, std::vector<double>());
 
-void M_Sort(std::vector<int> &arr, int l, int r) {
-    if (l >= r) {
-        return;
-    }
-    int m = l + (r - l) / 2;
-    M_Sort(arr, l, m);
-    M_Sort(arr, m + 1, r);
-    merge(arr, l, m, r);
-}
-
-void I_Sort(std::vector<int> &a, int l, int r) {
-    for (int i = l + 1; i <= r; ++i) {
-        int temp = a[i];
-        int j = i - 1;
-        while (j >= l && a[j] > temp) {
-            a[j + 1] = a[j];
-            j -= 1;
-        };
-        a[j + 1] = temp;
-    }
-}
-
-void H_M_Sort(std::vector<int> &a, int l, int r, int t = 20) {
-    if (r - l + 1 <= t) {
-        I_Sort(a, l, r);
-        return;
-    }
-    int m = l + (r - l) / 2;
-    H_M_Sort(a, l, m, t);
-    H_M_Sort(a, m + 1, r, t);
-    merge(a, l, m, r);
-}
-
-class ArrayGenerator {
-    std::mt19937 gen;
+class RandomStreamGen {
+private:
+    const std::string alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-";
+    std::vector<std::string> a;
 public:
-    ArrayGenerator() : gen(std::random_device{}()) {}
-
-    std::vector<int> randomArray(int n) {
-        std::uniform_int_distribution<int> dist(0, 6000);
-        std::vector<int> a(n);
-        for (int i = 0; i < n; ++i) {
-            a[i] = dist(gen);
+    void generate(size_t n) {
+        std::random_device rd;
+        std::mt19937 gen(rd());
+        std::uniform_int_distribution<int> s_size(5, 30);
+        std::uniform_int_distribution<int> char_index(0, alphabet.size() - 1);
+        a.clear();
+        for (size_t i = 0; i < n; ++i) {
+            std::string s;
+            int len = s_size(gen);
+            for (int j = 0; j < len; ++j) {
+                s += alphabet[char_index(gen)];
+            }
+            a.push_back(s);
         }
-        return a;
     }
 
-    std::vector<int> reverseSortedArray(int n) {
-        std::vector<int> a = randomArray(n);
-        std::sort(a.begin(), a.end());
-        std::reverse(a.begin(), a.end());
-        return a;
+    std::vector<std::string> get_part(double p) const {
+        if (p > 1.0) p = 1.0;
+        if (p < 0.0) p = 0.0;
+        size_t end_idx = static_cast<size_t>(a.size() * p);
+        return std::vector<std::string>(a.begin(), a.begin() + end_idx);
     }
 
+    const std::vector<std::string> &get_full() const { return a; }
+};
 
-    std::vector<int> almostSortedArray(int n) {
-        std::vector<int> a = randomArray(n);
-        std::uniform_int_distribution<int> dist(0, n - 1);
-        for (int i = 0; i < 20; ++i) {
-            int f = dist(gen);
-            int s = dist(gen);
-            std::swap(a[f], a[s]);
+
+class HashFuncGen {
+public:
+    static uint32_t hash(const std::string &str) {
+        uint32_t basis = 0x811c9dc5;
+        uint32_t prime = 0x01000193;
+        uint32_t hash = basis;
+
+        for (char c: str) {
+            hash ^= static_cast<uint8_t>(c);
+            hash *= prime;
         }
-        return a;
+        return hash;
     }
 };
 
 
+class HyperLogLog {
+private:
+    int B;
+    int m;
+    double alpha;
+    std::vector<int> v;
+
+    int count_zeros(uint32_t x, int max_bits) {
+        if (x == 0) return max_bits + 1;
+        int zeros = 0;
+        for (int i = max_bits - 1; i >= 0; --i) {
+            if ((x >> i) & 1) break;
+            zeros++;
+        }
+        return zeros + 1;
+    }
+
+public:
+    HyperLogLog(int b_bits) : B(b_bits) {
+        m = 1 << B;
+        v = std::vector<int>(m);
+
+        if (B == 4) alpha = 0.673;
+        else if (m == 5) alpha = 0.697;
+        else if (m == 6) alpha = 0.709;
+        else alpha = 0.7213 / (1.0 + 1.079 / m);
+    }
+
+    void add(const std::string &str) {
+        uint32_t x = HashFuncGen::hash(str);
+        uint32_t ind = x >> (32 - B);
+        uint32_t ost = x << B;
+        int rank = count_zeros(ost, 32 - B);
+        v[ind] = std::max(v[ind], rank);
+    }
+
+    double estimate() {
+        double sum = 0;
+        for (int val: v) {
+            sum += std::pow(2.0, -val);
+        }
+        double E = alpha * m * m / sum;
+        if (E <= 2.5 * m) {
+            int V = 0;
+            for (int val: v) if (val == 0) V++;
+            if (V > 0) E = m * std::log((double) m / V);
+        }
+        return E;
+    }
+};
+
+
+void experiment() {
+    std::ofstream file("result.csv");
+    int size = 100000;
+    int B = 12;
+    RandomStreamGen gen;
+    gen.generate(size);
+    const auto &stream = gen.get_full();
+
+    HyperLogLog hll(B);
+    std::set < std::string > exact;
+
+    file << "step,F0,Nt,error\n";
+
+    double pred = 0;
+    for (int p = 5; p <= 100; p += 5) {
+        double rat = p / 100.0;
+        size_t end = static_cast<size_t>(size * rat);
+        size_t start = static_cast<size_t>(size * (p - 5) / 100.0);
+
+        for (size_t i = start; i < end; ++i) {
+            hll.add(stream[i]);
+            exact.insert(stream[i]);
+        }
+
+        pred = hll.estimate();
+        size_t f0 = exact.size();
+        double error = std::abs(pred - f0) / f0 * 100.0;
+        memory[p / 5 - 1].push_back(pred);
+
+        file << p << "," << f0 << "," << std::fixed << std::setprecision(2)
+             << pred << "," << error << "\n";
+    }
+    file.close();
+}
+
 int main() {
-    std::ofstream file1("SET3_A2_randArr.csv");
-    file1 << "N,time\n";
-    std::ofstream file2("SET3_A2_rev_randArr.csv");
-    file2 << "N,time\n";
-    std::ofstream file3("SET3_A2_almostSortedArr.csv");
-    file3 << "N,time\n";
-    std::random_device seed;
-    std::mt19937 gen(seed());
-    ArrayGenerator arrG = ArrayGenerator();
-    std::vector<int> a = arrG.randomArray(100000);
-    std::vector<int> b = arrG.reverseSortedArray(100000);
-    std::vector<int> c = arrG.almostSortedArray(100000);
-    for (int i = 500; i < 100000; i += 100) {
-        std::uniform_int_distribution<> dist(0, 100000 - i - 1);
-        int l = dist(gen);
-        auto start = std::chrono::high_resolution_clock::now();
-        M_Sort(a, l, l + i);
-        auto elapsed = std::chrono::high_resolution_clock::now() - start;
-        long long msec = std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count();
-        file1 << i << "," << msec << "\n";
+    int k = 10;
+    std::ofstream file("result2.csv");
+    file << "step,E,sigma\n";
+    for (int i = 0; i < k; ++i) {
+        experiment();
     }
-    for (int i = 500; i < 100000; i += 100) {
-        std::uniform_int_distribution<> dist(0, 100000 - i - 1);
-        int l = dist(gen);
-        auto start = std::chrono::high_resolution_clock::now();
-        M_Sort(b, l, l + i);
-        auto elapsed = std::chrono::high_resolution_clock::now() - start;
-        long long msec = std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count();
-        file2 << i << "," << msec << "\n";
-    }
-    for (int i = 500; i < 100000; i += 100) {
-        std::uniform_int_distribution<> dist(0, 100000 - i - 1);
-        int l = dist(gen);
-        auto start = std::chrono::high_resolution_clock::now();
-        M_Sort(c, l, l + i);
-        auto elapsed = std::chrono::high_resolution_clock::now() - start;
-        long long msec = std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count();
-        file3 << i << "," << msec << "\n";
+    for (int i = 0; i < 20; ++i) {
+        double E = 0, sigma = 0;
+        for (double j: memory[i]) {
+            E += j;
+        }
+        E /= k;
+        for (double j: memory[i]) {
+            sigma += (j - E) * (j - E);
+        }
+        sigma /= k;
+        sigma = std::sqrt(sigma);
+        file << (i + 1) * 5 << "," << E << "," << std::fixed << std::setprecision(2)
+             << sigma << std::fixed << std::setprecision(2) << "\n";
     }
 
-
-    file1.close();
-    file2.close();
-    file3.close();
+    file.close();
     return 0;
 }
